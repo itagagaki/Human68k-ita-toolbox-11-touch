@@ -16,6 +16,8 @@
 * Itagaki Fumihiko 26-Jan-93  -f オプションが指定されている場合には，ファイル引数が与えられ
 *                             ていなくても正常終了するようにした．
 * 1.3
+* Itagaki Fumihiko 03-Jan-94  -r <file> や -R <file> は -r<file> -R<file> と書いても良い．
+* 1.4
 *
 * Usage: touch [ -cdf ] [ -rR file ] [ MMDDhhmm[[CC]YY][.ss] ] [ -- ] <file> ...
 
@@ -173,12 +175,14 @@ set_option_done:
 		bra	decode_opt_loop1
 
 option_r:
-		tst.b	(a0)+
-		bne	bad_arg
+		tst.b	(a0)
+		bne	option_r_1
 
 		subq.l	#1,d7
 		bcs	too_few_args
 
+		addq.l	#1,a0
+option_r_1:
 		bset	d1,d5
 		movea.l	a0,a4
 		bsr	strfor1
@@ -409,18 +413,14 @@ exit_program:
 
 bad_date:
 		lea	msg_bad_date(pc),a0
-		bra	bad_arg_1
+		bra	werror_usage
 
 no_filearg:
 		btst	#FLAG_f,d5
 		bne	exit_program
 too_few_args:
 		lea	msg_too_few_args(pc),a0
-		bra	bad_arg_1
-
-bad_arg:
-		lea	msg_bad_arg(pc),a0
-bad_arg_1:
+werror_usage:
 		bsr	werror_myname_and_msg
 usage:
 		lea	msg_usage(pc),a0
@@ -766,7 +766,7 @@ perror_1:
 .data
 
 	dc.b	0
-	dc.b	'## touch 1.3 ##  Copyright(C)1992-93 by Itagaki Fumihiko',0
+	dc.b	'## touch 1.4 ##  Copyright(C)1992-94 by Itagaki Fumihiko',0
 
 .even
 perror_table:
@@ -813,7 +813,6 @@ msg_colon:			dc.b	': ',0
 word_me:			dc.b	'-me',0
 msg_no_memory:			dc.b	'メモリが足りません',CR,LF,0
 msg_illegal_option:		dc.b	'不正なオプション -- ',0
-msg_bad_arg:			dc.b	'引数が正しくありません',0
 msg_bad_date:			dc.b	'日付と時刻の指定が正しくありません',0
 msg_bad_year:			dc.b	'年は1980-2107の範囲に限られます',CR,LF,0
 msg_too_few_args:		dc.b	'引数が足りません',0
@@ -822,7 +821,8 @@ msg_cannot_access_link:		dc.b	'lndrvが組み込まれていないためシンボリック・リンク
 msg_bad_link:			dc.b	'異常なシンボリック・リンクです',0
 msg_cannot_resume_mode:		dc.b	'PANIC! 属性を元に戻せませんでした',0
 msg_usage:			dc.b	CR,LF
-				dc.b	'使用法:  touch [-cdf] [-rR <参照ファイル>] [MMDDhhmm[[CC]YY][.ss]] [--] <ファイル> ...'
+				dc.b	'使用法:  touch [-cdf] [MMDDhhmm[[CC]YY][.ss]] [--] <ファイル> ...',CR,LF
+				dc.b	'         touch [-cdf] [-rR <参照ファイル>] [--] <ファイル> ...'
 msg_newline:			dc.b	CR,LF,0
 msg_me:				dc.b	'touch: you: 異常です',CR,LF,0
 *****************************************************************

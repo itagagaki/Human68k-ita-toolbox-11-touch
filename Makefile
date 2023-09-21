@@ -9,9 +9,9 @@ RM      = -rm -f
 INCLUDE = $(HOME)/fish/include
 
 DESTDIR   = A:/usr/ita
-BACKUPDIR = B:/touch/1.3
-RELEASE_ARCHIVE = TOUCH13
-RELEASE_FILES = MANIFEST README ../NOTICE ../DIRECTORY ../HUPAIR CHANGES touch.1 touch.x
+BACKUPDIR = B:/touch/1.4
+RELEASE_ARCHIVE = TOUCH14
+RELEASE_FILES = MANIFEST README ../NOTICE CHANGES touch.1 touch.x
 
 EXTLIB = ../lib/getlnenv.o $(HOME)/fish/lib/ita.l
 

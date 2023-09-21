@@ -1,0 +1,6 @@
+MANIFEST       このファイル
+README         まず最初にお読み下さい
+NOTICE         版権と許諾についての告示書
+CHANGES        touchのモデルチェンジの履歴
+touch.1        touchのマニュアル
+touch.x        touch実行ファイル
