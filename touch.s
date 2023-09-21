@@ -18,8 +18,10 @@
 * 1.3
 * Itagaki Fumihiko 03-Jan-94  -r <file> や -R <file> は -r<file> -R<file> と書いても良い．
 * 1.4
+* Itagaki Fumihiko 05-Jan-95  指定形式を [[CC]YY]MMDDhhmm[.ss] に変更
+* 1.5
 *
-* Usage: touch [ -cdf ] [ -rR file ] [ MMDDhhmm[[CC]YY][.ss] ] [ -- ] <file> ...
+* Usage: touch [ -cdf ] [ -rR file | [[CC]YY]MMDDhhmm[.ss] ] [ -- ] <file> ...
 
 .include doscall.h
 .include error.h
@@ -31,7 +33,7 @@
 .xref isdigit
 .xref issjis
 .xref strlen
-.xref strcmp
+.xref strchr
 .xref strfor1
 .xref strip_excessive_slashes
 
@@ -95,13 +97,6 @@ start1:
 		bsr	DecodeHUPAIR			*  引数をデコードする
 		movea.l	a1,a0				*  A0 : 引数ポインタ
 		move.l	d0,d7				*  D7.L : 引数カウンタ
-		subq.l	#1,d0
-		bne	decode_opt_start
-
-		lea	word_me(pc),a1
-		bsr	strcmp
-		beq	touch_me
-decode_opt_start:
 		moveq	#0,d5				*  D5.L : flags
 		clr.l	a4				*  A4 : reffile
 decode_opt_loop1:
@@ -197,9 +192,58 @@ decode_datime_arg:
 
 		subq.l	#1,d7
 		moveq	#0,d1
+		movea.l	a0,a1
+		moveq	#'.',d0
+		bsr	strchr
+		exg	a0,a1
+		move.l	a1,d0
+		sub.l	a0,d0
+		subq.l	#8,d0
+		blo	bad_date
+		beq	no_year
+
+		subq.l	#2,d0
+		blo	bad_date
+		beq	year_2digit
+
+		subq.l	#2,d0
+		bne	bad_date
+	*  CCYY
+		bsr	get2digit
+		mulu	#100,d0
+		move.w	d0,d2
+		bsr	get2digit
+		add.w	d2,d0
+		sub.w	#1980,d0
+		blo	bad_year
+
+		cmp.w	#127,d0
+		bls	set_year
+bad_year:
+		lea	msg_bad_year(pc),a0
+		bsr	werror_myname_and_msg
+		bra	exit_1
+
+year_2digit:
+	*  YY
+		bsr	get2digit
+		sub.b	#80,d0
+		bhs	set_year
+
+		add.b	#100,d0
+set_year:
+		lsl.w	#4,d0
+		lsl.w	#5,d0
+		bra	set_year_1
+
+no_year:
+		DOS	_GETDATE
+		and.w	#$fe00,d0
+set_year_1:
+		or.w	d0,d1
+year_ok:
 	*  MM
 		bsr	get2digit
-		bmi	bad_date
 		beq	bad_date
 
 		cmp.b	#12,d0
@@ -209,7 +253,6 @@ decode_datime_arg:
 		or.w	d0,d1
 	*  DD
 		bsr	get2digit
-		bmi	bad_date
 		beq	bad_date
 
 		cmp.b	#31,d0
@@ -219,8 +262,6 @@ decode_datime_arg:
 		swap	d1
 	*  hh
 		bsr	get2digit
-		bmi	bad_date
-
 		cmp.b	#23,d0
 		bhi	bad_date
 
@@ -229,61 +270,13 @@ decode_datime_arg:
 		or.w	d0,d1
 	*  mm
 		bsr	get2digit
-		bmi	bad_date
-
 		cmp.b	#59,d0
 		bhi	bad_date
 
 		lsl.w	#5,d0
 		or.w	d0,d1
-	*  [[CC]YY]
-		move.b	(a0),d0
-		bsr	isdigit
-		bne	year_default
 
-		bsr	get2digit
-		bmi	bad_date
-
-		move.w	d0,d2
-		move.b	(a0),d0
-		bsr	isdigit
-		bne	year_2digit
-
-		bsr	get2digit
-		bmi	bad_date
-
-		mulu	#100,d2
-		add.w	d0,d2
-		sub.w	#1980,d2
-		blo	bad_year
-
-		cmp.w	#127,d2
-		bls	set_year
-bad_year:
-		lea	msg_bad_year(pc),a0
-		bsr	werror_myname_and_msg
-		bra	exit_1
-
-year_2digit:
-		sub.b	#80,d2
-		bhs	set_year
-
-		add.b	#100,d2
-set_year:
-		lsl.w	#4,d2
-		lsl.w	#5,d2
-		swap	d1
-		or.w	d2,d1
-		swap	d1
-		bra	year_ok
-
-year_default:
-		DOS	_GETDATE
-		and.l	#$0000fe00,d0
-		swap	d0
-		or.l	d0,d1
-year_ok:
-	*  [.ss]
+	*  .ss
 		move.b	(a0)+,d0
 		beq	datimearg_ok
 
@@ -291,13 +284,12 @@ year_ok:
 		bne	bad_date
 
 		bsr	get2digit
-		bmi	bad_date
-
 		cmp.b	#59,d0
 		bhi	bad_date
 
 		lsr.w	#1,d0
 		or.w	d0,d1
+
 		tst.b	(a0)+
 		bne	bad_date
 datimearg_ok:
@@ -452,12 +444,6 @@ touch_error_exit_3:
 		bsr	werror_myname_and_msg
 		moveq	#3,d6
 		bra	exit_program
-
-touch_me:
-		pea	msg_me(pc)
-		DOS	_PRINT
-		addq.l	#4,a7
-		bra	exit_program
 *****************************************************************
 * touch_one
 *
@@ -558,28 +544,23 @@ get2digit:
 		moveq	#0,d0
 		move.b	(a0)+,d0
 		sub.b	#'0',d0
-		blo	get2digit_error
+		blo	bad_date
 
 		cmp.b	#9,d0
-		bhi	get2digit_error
+		bhi	bad_date
 
 		mulu	#10,d0
 		move.b	(a0)+,d1
 		sub.b	#'0',d1
-		blo	get2digit_error
+		blo	bad_date
 
 		cmp.b	#9,d1
-		bhi	get2digit_error
+		bhi	bad_date
 
 		add.b	d1,d0
-get2digit_return:
 		move.w	(a7)+,d1
 		tst.l	d0
 		rts
-
-get2digit_error:
-		moveq	#-1,d0
-		bra	get2digit_return
 *****************************************************************
 * findfile
 *
@@ -766,7 +747,7 @@ perror_1:
 .data
 
 	dc.b	0
-	dc.b	'## touch 1.4 ##  Copyright(C)1992-94 by Itagaki Fumihiko',0
+	dc.b	'## touch 1.5 ##  Copyright(C)1992-95 by Itagaki Fumihiko',0
 
 .even
 perror_table:
@@ -810,7 +791,6 @@ msg_disk_full:		dc.b	'ディスクが満杯です',0
 
 msg_myname:			dc.b	'touch'
 msg_colon:			dc.b	': ',0
-word_me:			dc.b	'-me',0
 msg_no_memory:			dc.b	'メモリが足りません',CR,LF,0
 msg_illegal_option:		dc.b	'不正なオプション -- ',0
 msg_bad_date:			dc.b	'日付と時刻の指定が正しくありません',0
@@ -821,10 +801,8 @@ msg_cannot_access_link:		dc.b	'lndrvが組み込まれていないためシンボリック・リンク
 msg_bad_link:			dc.b	'異常なシンボリック・リンクです',0
 msg_cannot_resume_mode:		dc.b	'PANIC! 属性を元に戻せませんでした',0
 msg_usage:			dc.b	CR,LF
-				dc.b	'使用法:  touch [-cdf] [MMDDhhmm[[CC]YY][.ss]] [--] <ファイル> ...',CR,LF
-				dc.b	'         touch [-cdf] [-rR <参照ファイル>] [--] <ファイル> ...'
+				dc.b	'使用法:  touch [-cdf] [ -rR <参照ファイル> | [[CC]YY]MMDDhhmm[.ss] ] [--] <ファイル> ...'
 msg_newline:			dc.b	CR,LF,0
-msg_me:				dc.b	'touch: you: 異常です',CR,LF,0
 *****************************************************************
 .bss
 

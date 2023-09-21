@@ -9,8 +9,8 @@ RM      = -rm -f
 INCLUDE = $(HOME)/fish/include
 
 DESTDIR   = A:/usr/ita
-BACKUPDIR = B:/touch/1.4
-RELEASE_ARCHIVE = TOUCH14
+BACKUPDIR = B:/touch/1.5
+RELEASE_ARCHIVE = TOUCH15
 RELEASE_FILES = MANIFEST README ../NOTICE CHANGES touch.1 touch.x
 
 EXTLIB = ../lib/getlnenv.o $(HOME)/fish/lib/ita.l
@@ -40,7 +40,7 @@ clobber:: clean
 
 ###
 
-$(PROGRAM) : $(INCLUDE)/doscall.h $(INCLUDE)/chrcode.h $(EXTLIB)
+$(PROGRAM) : $(INCLUDE)/doscall.h $(INCLUDE)/error.h $(INCLUDE)/stat.h $(INCLUDE)/chrcode.h $(EXTLIB)
 
 include ../Makefile.sub
 
