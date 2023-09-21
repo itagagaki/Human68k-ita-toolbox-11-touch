@@ -2,8 +2,10 @@
 *
 * Itagaki Fumihiko 12-Oct-92  Create.
 * 1.0
-* Itagaki Fumihiko 06-Nov-92  strip_excessive_slashesのバグfixに伴う改版。
+* Itagaki Fumihiko 06-Nov-92  strip_excessive_slashesのバグfixに伴う改版．
 * 1.1
+* Itagaki Fumihiko 16-Nov-92  get_present_timeの修正．
+* 1.2
 *
 * Usage: touch [ -cdf ] [ -rR file ] [ MMDDhhmm[[CC]YY][.ss] ] [ - ] <file> ...
 
@@ -477,22 +479,18 @@ cannot_resume_mode:
 		bra	werror_myname_word_colon_msg
 *****************************************************************
 get_present_time:
-		movem.l	d0/a2,-(a7)
+		movem.l	d0/d2,-(a7)
 		DOS	_GETDATE
-		move.l	d0,d2
+get_present_time_loop:
+		move.w	d0,d2
 		move.w	d0,d1
 		swap	d1
-get_present_time_loop:
 		DOS	_GETTIME
 		move.w	d0,d1
 		DOS	_GETDATE
-		cmp.l	d2,d0
-		beq	get_present_time_return
+		cmp.w	d2,d0
+		bne	get_present_time_loop
 
-		move.l	d0,d2
-		bra	get_present_time_loop
-
-get_present_time_return:
 		movem.l	(a7)+,d0/d2
 		rts
 *****************************************************************
@@ -699,7 +697,7 @@ perror_1:
 .data
 
 	dc.b	0
-	dc.b	'## touch 1.1 ##  Copyright(C)1992 by Itagaki Fumihiko',0
+	dc.b	'## touch 1.2 ##  Copyright(C)1992 by Itagaki Fumihiko',0
 
 .even
 perror_table:
