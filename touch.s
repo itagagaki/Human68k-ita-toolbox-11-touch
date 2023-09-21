@@ -1,6 +1,9 @@
 * touch - change file date
 *
 * Itagaki Fumihiko 12-Oct-92  Create.
+* 1.0
+* Itagaki Fumihiko 06-Nov-92  strip_excessive_slashesÇÃÉoÉOfixÇ…î∫Ç§â¸î≈ÅB
+* 1.1
 *
 * Usage: touch [ -cdf ] [ -rR file ] [ MMDDhhmm[[CC]YY][.ss] ] [ - ] <file> ...
 
@@ -696,7 +699,7 @@ perror_1:
 .data
 
 	dc.b	0
-	dc.b	'## touch 1.0 ##  Copyright(C)1992 by Itagaki Fumihiko',0
+	dc.b	'## touch 1.1 ##  Copyright(C)1992 by Itagaki Fumihiko',0
 
 .even
 perror_table:
