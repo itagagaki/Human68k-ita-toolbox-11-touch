@@ -6,8 +6,18 @@
 * 1.1
 * Itagaki Fumihiko 16-Nov-92  get_present_timeの修正．
 * 1.2
+* Itagaki Fumihiko 30-Dec-92  tfopen を呼ばずに直接 OPEN するようにした．
+* Itagaki Fumihiko 30-Dec-92  msg_write_disabled を perror に追加した．
+* Itagaki Fumihiko 30-Dec-92  reffile のエラーは -f でも報告するようにした．
+* Itagaki Fumihiko 30-Dec-92  reffile のメディアがプロテクトされているとエラーとなる不具合を修正．
+* Itagaki Fumihiko 10-Jan-93  GETPDB -> lea $10(a0),a0
+* Itagaki Fumihiko 20-Jan-93  引数 - と -- の扱いの変更
+* Itagaki Fumihiko 22-Jan-93  スタックを拡張
+* Itagaki Fumihiko 26-Jan-93  -f オプションが指定されている場合には，ファイル引数が与えられ
+*                             ていなくても正常終了するようにした．
+* 1.3
 *
-* Usage: touch [ -cdf ] [ -rR file ] [ MMDDhhmm[[CC]YY][.ss] ] [ - ] <file> ...
+* Usage: touch [ -cdf ] [ -rR file ] [ MMDDhhmm[[CC]YY][.ss] ] [ -- ] <file> ...
 
 .include doscall.h
 .include error.h
@@ -19,12 +29,11 @@
 .xref isdigit
 .xref issjis
 .xref strlen
+.xref strcmp
 .xref strfor1
 .xref strip_excessive_slashes
-.xref tfopen
-.xref fclose
 
-STACKSIZE	equ	4096
+STACKSIZE	equ	16384			*  スーパーバイザモードでは15KB以上必要
 
 FLAG_c		equ	0
 FLAG_d		equ	1
@@ -54,9 +63,8 @@ start:
 		bra.s	start1
 		dc.b	'#HUPAIR',0
 start1:
-		lea	stack_bottom,a7			*  A7 := スタックの底
-		DOS	_GETPDB
-		movea.l	d0,a0				*  A0 : PDBアドレス
+		lea	stack_bottom(pc),a7		*  A7 := スタックの底
+		lea	$10(a0),a0			*  A0 : PDBアドレス
 		move.l	a7,d0
 		sub.l	a0,d0
 		move.l	d0,-(a7)
@@ -81,12 +89,19 @@ start1:
 	*
 	*  オプション引数を解釈する
 	*
+		moveq	#0,d6				*  D6.W : エラー・コード
 		bsr	DecodeHUPAIR			*  引数をデコードする
 		movea.l	a1,a0				*  A0 : 引数ポインタ
 		move.l	d0,d7				*  D7.L : 引数カウンタ
+		subq.l	#1,d0
+		bne	decode_opt_start
+
+		lea	word_me(pc),a1
+		bsr	strcmp
+		beq	touch_me
+decode_opt_start:
 		moveq	#0,d5				*  D5.L : flags
 		clr.l	a4				*  A4 : reffile
-		moveq	#0,d6				*  D6.W : エラー・コード
 decode_opt_loop1:
 		tst.l	d7
 		beq	no_datime_arg
@@ -98,10 +113,19 @@ decode_opt_loop1:
 		cmp.b	#'-',d0
 		bne	no_datime_arg
 
+		tst.b	1(a0)
+		beq	no_datime_arg
+
 		subq.l	#1,d7
 		addq.l	#1,a0
 		move.b	(a0)+,d0
+		cmp.b	#'-',d0
+		bne	decode_opt_loop2
+
+		tst.b	(a0)+
 		beq	no_datime_arg
+
+		subq.l	#1,a0
 decode_opt_loop2:
 		moveq	#FLAG_c,d1
 		cmp.b	#'c',d0
@@ -279,10 +303,13 @@ datimearg_ok:
 		cmpi.b	#'-',(a0)
 		bne	touch_start
 
-		tst.b	1(a0)
+		cmpi.b	#'-',1(a0)
 		bne	touch_start
 
-		addq.l	#2,a0
+		tst.b	2(a0)
+		bne	touch_start
+
+		addq.l	#3,a0
 		subq.l	#1,d7
 		bra	touch_start
 
@@ -301,38 +328,71 @@ get_reffile_datime:
 		exg	a0,a4
 		btst	#FLAG_R,d5
 		sne	d1
+		move.l	d5,-(a7)
+		bclr	#FLAG_f,d5
 		bsr	findfile
+		move.l	(a7)+,d5
+		tst.l	d0
 		bmi	exit_program
 
-		move.l	d2,d0
+		tst.l	d2
+		bmi	reffile_nofile
+
+		btst	#MODEBIT_LNK,d2
+		beq	do_get_reffile_datime
+
+		*  シンボリック・リンク・ファイルの時刻を得る
+		move.l	lndrv,d0
+		beq	do_get_reffile_datime
+
+		movea.l	d0,a2
+		lea	refname(pc),a1
+		clr.l	-(a7)
+		DOS	_SUPER				*  スーパーバイザ・モードに切り換える
+		addq.l	#4,a7
+		move.l	d0,-(a7)			*  前の SSP の値
+		movem.l	d5-d7/a0-a4,-(a7)
+		move.l	a0,-(a7)
+		move.l	a1,-(a7)
+		movea.l	LNDRV_realpathcpy(a2),a3
+		jsr	(a3)
+		addq.l	#8,a7
+		movem.l	(a7)+,d5-d7/a0-a4
+		tst.l	d0
+		bmi	reffile_bad_link
+
+		movem.l	d5-d7/a0-a4,-(a7)
+		move.w	#MODEVAL_ALL,-(a7)
+		move.l	a1,-(a7)
+		pea	filesbuf(pc)
+		movea.l	a7,a6
+		movea.l	LNDRV_O_FILES(a2),a3
+		jsr	(a3)
+		lea	10(a7),a7
+		movem.l	(a7)+,d5-d7/a0-a4
+		move.l	d0,d1
+		DOS	_SUPER				*  ユーザ・モードに戻す
+		addq.l	#4,a7
+		move.l	d1,d0
+		bra	do_get_reffile_datime_1
+
+do_get_reffile_datime:
+		move.w	#MODEVAL_ALL,-(a7)
+		move.l	a1,-(a7)
+		pea	filesbuf(pc)
+		DOS	_FILES
+		lea	10(a7),a7
+do_get_reffile_datime_1:
+		tst.l	d0
 		bmi	reffile_perror
 
+		move.l	filesbuf+ST_TIME(pc),d1
+		swap	d1				*  D1.L : filedate
 		exg	a0,a4
-		moveq	#MODEVAL_ARC,d0
-		bsr	lchmod
-		moveq	#0,d0
-		exg	a0,a1
-		bsr	tfopen
-		exg	a0,a1
-		bmi	reffile_error2
-
-		move.w	d0,d1
-		clr.l	-(a7)
-		move.w	d1,-(a7)
-		DOS	_FILEDATE
-		addq.l	#6,a7
-		cmp.l	#$ffff0000,d0
-		bhs	reffile_error3
-
-		exg	d0,d1				*  D1.L : filedate
-		bsr	fclose
-		move.l	d2,d0
-		bsr	lchmod
-		bmi	reffile_error4
 touch_start:
 		move.l	d1,date
 		tst.l	d7
-		beq	too_few_args
+		beq	no_filearg
 touch_loop:
 		movea.l	a0,a1
 		bsr	strfor1
@@ -351,6 +411,9 @@ bad_date:
 		lea	msg_bad_date(pc),a0
 		bra	bad_arg_1
 
+no_filearg:
+		btst	#FLAG_f,d5
+		bne	exit_program
 too_few_args:
 		lea	msg_too_few_args(pc),a0
 		bra	bad_arg_1
@@ -366,28 +429,21 @@ exit_1:
 		moveq	#1,d6
 		bra	exit_program
 
-reffile_error3:
-		bsr	fclose1
-reffile_error2:
-		bsr	perror
-		move.l	d2,d0
-		bsr	lchmod
-		bsr	lgetmode
-		cmp.l	d2,d0
-		beq	exit_program
-reffile_error4:
-		exg	a0,a1
-		bsr	cannot_resume_mode
-		exg	a0,a1
-		bra	exit_program
-
 reffile_perror:
 		cmp.l	#ENODIR,d0
 		bne	reffile_perror_1
-
+reffile_nofile:
 		moveq	#ENOFILE,d0
 reffile_perror_1:
+		bclr	#FLAG_f,d5
 		bsr	perror
+		bra	exit_program
+
+reffile_bad_link:
+		DOS	_SUPER				*  ユーザ・モードに戻す
+		addq.l	#4,a7
+		lea	msg_bad_link(pc),a2
+		bsr	werror_myname_word_colon_msg
 		bra	exit_program
 
 insufficient_memory:
@@ -395,6 +451,12 @@ insufficient_memory:
 touch_error_exit_3:
 		bsr	werror_myname_and_msg
 		moveq	#3,d6
+		bra	exit_program
+
+touch_me:
+		pea	msg_me(pc)
+		DOS	_PRINT
+		addq.l	#4,a7
 		bra	exit_program
 *****************************************************************
 * touch_one
@@ -416,7 +478,7 @@ touch_one:
 
 		moveq	#MODEVAL_ARC,d0
 		btst	#FLAG_f,d5
-		bne	touch_force
+		bne	touch_chmod
 
 		move.b	d2,d0
 		and.b	#(MODEVAL_VOL|MODEVAL_DIR|MODEVAL_LNK),d0
@@ -427,16 +489,14 @@ touch_one:
 		bclr	#MODEBIT_DIR,d0
 		bclr	#MODEBIT_LNK,d0
 		bset	#MODEBIT_ARC,d0
-touch_force:
-		bsr	lchmod
+touch_chmod:
+		bsr	lchmod_a1
 		bpl	touch_open
 touch_mode_ok:
 		moveq	#-1,d2
 touch_open:
 		moveq	#2,d0
-		exg	a0,a1
-		bsr	tfopen
-		exg	a0,a1
+		bsr	fopen_a1
 		bra	do_touch_datime
 
 touch_nofile:
@@ -461,7 +521,7 @@ do_touch_datime:
 		DOS	_FILEDATE
 		addq.l	#6,a7
 touch_done:
-		bsr	fclose1
+		bsr	fclose_d1
 		bpl	touch_success
 touch_open_fail:
 		bsr	perror
@@ -469,14 +529,13 @@ touch_success:
 		move.l	d2,d0
 		bmi	touch_return
 
-		bsr	lchmod
-		bmi	cannot_resume_mode
+		bsr	lchmod_a1
+		bpl	touch_return
+
+		lea	msg_cannot_resume_mode(pc),a2
+		bsr	werror_myname_word_colon_msg
 touch_return:
 		rts
-
-cannot_resume_mode:
-		lea	msg_cannot_resume_mode(pc),a2
-		bra	werror_myname_word_colon_msg
 *****************************************************************
 get_present_time:
 		movem.l	d0/d2,-(a7)
@@ -531,7 +590,7 @@ get2digit_error:
 * RETURN
 *      A1     real pathname (points static)
 *      D0.L   負ならエラー
-*      D2.L   lgetmode のステータス
+*      D2.L   lgetmode_a1 のステータス
 *      CCR    TST.L D0
 *
 * RETURN
@@ -539,7 +598,7 @@ get2digit_error:
 *****************************************************************
 findfile:
 		movea.l	a0,a1
-		bsr	lgetmode
+		bsr	lgetmode_a1
 		move.l	d0,d2				*  D2.L : mode
 		bmi	findfile_nomode
 
@@ -547,7 +606,9 @@ findfile:
 		beq	findfile_return
 
 		tst.b	d1
-		bne	findfile_return
+		bne	findfile_return			*  リンク・ファイルそのものを得た
+
+		*  リンクが参照するファイルを得る
 
 		lea	msg_cannot_access_link(pc),a2
 		move.l	lndrv,d0
@@ -573,7 +634,7 @@ findfile:
 		tst.l	d1
 		bmi	findfile_werror
 
-		bsr	lgetmode
+		bsr	lgetmode_a1
 		move.l	d0,d2
 		bpl	findfile_return
 findfile_nomode:
@@ -592,7 +653,7 @@ findfile_nomode:
 		exg	a0,a1
 		bsr	strip_excessive_slashes
 		exg	a0,a1
-		bsr	lgetmode
+		bsr	lgetmode_a1
 		move.l	d0,d2
 		bpl	findfile_return
 
@@ -613,9 +674,9 @@ findfile_werror:
 		bsr	werror_myname_word_colon_msg_f
 		bra	findfile_error_return
 *****************************************************************
-lgetmode:
+lgetmode_a1:
 		moveq	#-1,d0
-lchmod:
+lchmod_a1:
 		move.w	d0,-(a7)
 		move.l	a1,-(a7)
 		DOS	_CHMOD
@@ -623,10 +684,19 @@ lchmod:
 		tst.l	d0
 		rts
 *****************************************************************
-fclose1:
+fopen_a1:
+		move.w	d0,-(a7)
+		move.l	a1,-(a7)
+		DOS	_OPEN
+		addq.l	#6,a7
+		tst.l	d0
+		rts
+*****************************************************************
+fclose_d1:
 		move.l	d0,-(a7)
-		move.w	d1,d0
-		bsr	fclose
+		move.w	d1,-(a7)
+		DOS	_CLOSE
+		addq.l	#2,a7
 		move.l	(a7)+,d0
 		rts
 *****************************************************************
@@ -666,7 +736,6 @@ werror_myname_word_colon_msg:
 		bsr	werror_myname_and_msg
 		move.l	a0,-(a7)
 		lea	msg_colon(pc),a0
-werror_word_msg_and_set_error:
 		bsr	werror
 		movea.l	a2,a0
 		bsr	werror
@@ -697,7 +766,7 @@ perror_1:
 .data
 
 	dc.b	0
-	dc.b	'## touch 1.2 ##  Copyright(C)1992 by Itagaki Fumihiko',0
+	dc.b	'## touch 1.3 ##  Copyright(C)1992-93 by Itagaki Fumihiko',0
 
 .even
 perror_table:
@@ -719,7 +788,7 @@ perror_table:
 	dc.w	msg_error-sys_errmsgs			*  15 (-16)
 	dc.w	msg_error-sys_errmsgs			*  16 (-17)
 	dc.w	msg_error-sys_errmsgs			*  17 (-18)
-	dc.w	msg_error-sys_errmsgs			*  18 (-19)
+	dc.w	msg_write_disabled-sys_errmsgs		*  18 (-19)
 	dc.w	msg_error-sys_errmsgs			*  19 (-20)
 	dc.w	msg_error-sys_errmsgs			*  20 (-21)
 	dc.w	msg_error-sys_errmsgs			*  21 (-22)
@@ -735,11 +804,13 @@ msg_nopath:		dc.b	'パスが存在していません',0
 msg_too_many_openfiles:	dc.b	'オープンしているファイルが多すぎます',0
 msg_bad_name:		dc.b	'名前が無効です',0
 msg_bad_drive:		dc.b	'ドライブの指定が無効です',0
+msg_write_disabled:	dc.b	'書き込みが許可されていません',0
 msg_directory_full:	dc.b	'ディレクトリが満杯です',0
 msg_disk_full:		dc.b	'ディスクが満杯です',0
 
 msg_myname:			dc.b	'touch'
 msg_colon:			dc.b	': ',0
+word_me:			dc.b	'-me',0
 msg_no_memory:			dc.b	'メモリが足りません',CR,LF,0
 msg_illegal_option:		dc.b	'不正なオプション -- ',0
 msg_bad_arg:			dc.b	'引数が正しくありません',0
@@ -751,19 +822,21 @@ msg_cannot_access_link:		dc.b	'lndrvが組み込まれていないためシンボリック・リンク
 msg_bad_link:			dc.b	'異常なシンボリック・リンクです',0
 msg_cannot_resume_mode:		dc.b	'PANIC! 属性を元に戻せませんでした',0
 msg_usage:			dc.b	CR,LF
-				dc.b	'使用法:  touch [-cdf] [-rR <参照ファイル>] [MMDDhhmm[[CC]YY][.ss]] [-] <ファイル> ...'
+				dc.b	'使用法:  touch [-cdf] [-rR <参照ファイル>] [MMDDhhmm[[CC]YY][.ss]] [--] <ファイル> ...'
 msg_newline:			dc.b	CR,LF,0
+msg_me:				dc.b	'touch: you: 異常です',CR,LF,0
 *****************************************************************
 .bss
 
 .even
 lndrv:			ds.l	1
 date:			ds.l	1
+.even
+filesbuf:		ds.b	STATBUFSIZE
 refname:		ds.b	128
 nameckbuf:		ds.b	91
 mode_mask:		ds.b	1
 mode_plus:		ds.b	1
-buffer:			ds.b	1
 .even
 			ds.b	STACKSIZE
 .even
